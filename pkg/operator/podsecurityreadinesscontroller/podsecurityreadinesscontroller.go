@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	psapi "k8s.io/pod-security-admission/api"
+	"k8s.io/pod-security-admission/policy"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -30,6 +31,7 @@ type PodSecurityReadinessController struct {
 
 	warningsHandler   *warningsHandler
 	namespaceSelector string
+	psaEvaluator      policy.Evaluator
 }
 
 func NewPodSecurityReadinessController(
@@ -49,11 +51,17 @@ func NewPodSecurityReadinessController(
 		return nil, err
 	}
 
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		return nil, err
+	}
+
 	c := &PodSecurityReadinessController{
 		operatorClient:    operatorClient,
 		kubeClient:        kubeClient,
 		warningsHandler:   warningsHandler,
 		namespaceSelector: selector,
+		psaEvaluator:      psaEvaluator,
 	}
 
 	return factory.New().
@@ -80,6 +88,9 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, syncCtx facto
 			}
 			if isViolating {
 				conditions.addViolation(&ns)
+				if isUserViolation {
+					conditions.addUserSCCViolation(&ns)
+				}
 			}
 
 			return nil

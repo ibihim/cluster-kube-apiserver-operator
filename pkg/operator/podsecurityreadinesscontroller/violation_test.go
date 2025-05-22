@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	psapi "k8s.io/pod-security-admission/api"
+	"k8s.io/pod-security-admission/policy"
 )
 
 // Need to add managed fields to mock namespaces, since violations are only checked for labels managed by the syncer
@@ -117,14 +118,20 @@ func TestIsNamespaceViolating(t *testing.T) {
 				warnings: tc.warnings,
 			}
 
+			psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+			if err != nil {
+				t.Fatalf("Failed to create PSA evaluator: %v", err)
+			}
+
 			controller := &PodSecurityReadinessController{
 				kubeClient:      tc.setupMockClient(),
 				warningsHandler: mockWarnings,
+				psaEvaluator:    psaEvaluator,
 			}
 
 			tc.namespace.ManagedFields = managedFields
 
-			violating, err := controller.isNamespaceViolating(context.Background(), tc.namespace)
+			violating, _, err := controller.isNamespaceViolating(context.Background(), tc.namespace)
 
 			if (err != nil) != tc.expectError {
 				t.Errorf("isNamespaceViolating() error = %v, expectError %v", err, tc.expectError)
@@ -156,6 +163,10 @@ func (m *mockCoreV1WithResponse) Namespaces() typedcorev1.NamespaceInterface {
 	return &mockNamespaceInterfaceWithResponse{error: m.error}
 }
 
+func (m *mockCoreV1WithResponse) Pods(namespace string) typedcorev1.PodInterface {
+	return &mockPodInterface{error: m.error}
+}
+
 type mockNamespaceInterfaceWithResponse struct {
 	typedcorev1.NamespaceInterface
 	error error
@@ -163,4 +174,16 @@ type mockNamespaceInterfaceWithResponse struct {
 
 func (m *mockNamespaceInterfaceWithResponse) Apply(ctx context.Context, nsApply *applyconfiguration.NamespaceApplyConfiguration, opts metav1.ApplyOptions) (*corev1.Namespace, error) {
 	return nil, m.error
+}
+
+type mockPodInterface struct {
+	typedcorev1.PodInterface
+	error error
+}
+
+func (m *mockPodInterface) List(ctx context.Context, opts metav1.ListOptions) (*corev1.PodList, error) {
+	if m.error != nil {
+		return nil, m.error
+	}
+	return &corev1.PodList{}, nil
 }

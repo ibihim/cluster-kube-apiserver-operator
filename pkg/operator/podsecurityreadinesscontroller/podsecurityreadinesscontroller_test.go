@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 	psapi "k8s.io/pod-security-admission/api"
+	"k8s.io/pod-security-admission/policy"
 )
 
 func TestPodSecurityViolationController(t *testing.T) {
@@ -350,14 +351,20 @@ func TestPodSecurityViolationController(t *testing.T) {
 				return true, nil, nil
 			})
 
+			psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+			if err != nil {
+				t.Fatalf("Failed to create PSA evaluator: %v", err)
+			}
+
 			controller := &PodSecurityReadinessController{
 				kubeClient: fakeClient,
 				warningsHandler: &warningsHandler{
 					warnings: tt.warnings,
 				},
+				psaEvaluator: psaEvaluator,
 			}
 
-			isViolating, err := controller.isNamespaceViolating(context.TODO(), tt.namespace)
+			isViolating, _, err := controller.isNamespaceViolating(context.TODO(), tt.namespace)
 			if (err != nil) != tt.expectedError {
 				t.Errorf("expected error %v, got %v", tt.expectedError, err)
 			}

@@ -19,11 +19,13 @@ const (
 	PodSecurityRunLevelZeroType   = "PodSecurityRunLevelZeroEvaluationConditionsDetected"
 	PodSecurityDisabledSyncerType = "PodSecurityDisabledSyncerEvaluationConditionsDetected"
 	PodSecurityInconclusiveType   = "PodSecurityInconclusiveEvaluationConditionsDetected"
+	PodSecurityUserSCCType        = "PodSecurityUserSCCViolationConditionsDetected"
 
 	labelSyncControlLabel = "security.openshift.io/scc.podSecurityLabelSync"
 
 	violationReason    = "PSViolationsDetected"
 	inconclusiveReason = "PSViolationDecisionInconclusive"
+	userSCCReason      = "PSUserSCCViolationsDetected"
 )
 
 var (
@@ -41,6 +43,7 @@ type podSecurityOperatorConditions struct {
 	violatingCustomerNamespaces       []string
 	violatingDisabledSyncerNamespaces []string
 	inconclusiveNamespaces            []string
+	userSCCViolationNamespaces        []string
 }
 
 func (c *podSecurityOperatorConditions) addViolation(ns *corev1.Namespace) {
@@ -68,6 +71,10 @@ func (c *podSecurityOperatorConditions) addInconclusive(ns *corev1.Namespace) {
 	c.inconclusiveNamespaces = append(c.inconclusiveNamespaces, ns.Name)
 }
 
+func (c *podSecurityOperatorConditions) addUserSCCViolation(ns *corev1.Namespace) {
+	c.userSCCViolationNamespaces = append(c.userSCCViolationNamespaces, ns.Name)
+}
+
 func makeCondition(conditionType, conditionReason string, namespaces []string) operatorv1.OperatorCondition {
 	var messageFormatter string
 
@@ -76,6 +83,8 @@ func makeCondition(conditionType, conditionReason string, namespaces []string) o
 		messageFormatter = "Violations detected in namespaces: %v"
 	case inconclusiveReason:
 		messageFormatter = "Could not evaluate violations for namespaces: %v"
+	case userSCCReason:
+		messageFormatter = "User SCC violations detected in namespaces: %v"
 	default:
 		messageFormatter = "Unexpected condition for namespace: %v"
 	}
@@ -109,5 +118,6 @@ func (c *podSecurityOperatorConditions) toConditionFuncs() []v1helpers.UpdateSta
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityRunLevelZeroType, violationReason, c.violatingRunLevelZeroNamespaces)),
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityDisabledSyncerType, violationReason, c.violatingDisabledSyncerNamespaces)),
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityInconclusiveType, inconclusiveReason, c.inconclusiveNamespaces)),
+		v1helpers.UpdateConditionFn(makeCondition(PodSecurityUserSCCType, userSCCReason, c.userSCCViolationNamespaces)),
 	}
 }

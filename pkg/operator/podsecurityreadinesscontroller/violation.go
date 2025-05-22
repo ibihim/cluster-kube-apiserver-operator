@@ -12,7 +12,6 @@ import (
 	applyconfiguration "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/klog/v2"
 	psapi "k8s.io/pod-security-admission/api"
-	"k8s.io/pod-security-admission/policy"
 )
 
 const (
@@ -69,50 +68,61 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 		return false, nil
 	}
 
+	// Parse the violating level
 	var enforcementLevel psapi.Level
-	enforcementVersion := psapi.LatestVersion()
-
 	switch strings.ToLower(label) {
 	case "restricted":
 		enforcementLevel = psapi.LevelRestricted
 	case "baseline":
 		enforcementLevel = psapi.LevelBaseline
 	case "privileged":
-		enforcementLevel = psapi.LevelPrivileged
+		// If privileged is violating, something is seriously wrong
+		// but testing against privileged level is pointless (everything passes)
+		klog.V(2).InfoS("Namespace violating privileged level - skipping user check", 
+			"namespace", ns.Name)
+		return false, nil
 	default:
 		return false, fmt.Errorf("unknown level: %q", label)
 	}
 
-	pods, err := c.kubeClient.CoreV1().Pods(ns.Name).List(context.TODO(), metav1.ListOptions{})
+	// List all pods and filter for user-annotated ones
+	allPods, err := c.kubeClient.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		klog.V(2).ErrorS(err, "Failed to list pods in namespace", "namespace", ns.Name)
 		return false, err
 	}
 
-	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
-	if err != nil {
-		panic(err)
+	// Filter for user-annotated pods
+	var userPods []corev1.Pod
+	for _, pod := range allPods.Items {
+		if pod.Annotations[securityv1.ValidatedSCCSubjectTypeAnnotation] == "user" {
+			userPods = append(userPods, pod)
+		}
 	}
 
-	for _, pod := range pods.Items {
-		if subjectType, ok := pod.Annotations[securityv1.ValidatedSCCSubjectTypeAnnotation]; ok && subjectType == "user" {
+	if len(userPods) == 0 {
+		return false, nil // No user pods = violation is from service accounts
+	}
 
-			results := psaEvaluator.EvaluatePod(
-				psapi.LevelVersion{Level: enforcementLevel, Version: enforcementVersion},
-				&pod.ObjectMeta,
-				&pod.Spec,
-			)
+	// Test user pods against the violating level
+	enforcementVersion := psapi.LatestVersion()
+	for _, pod := range userPods {
+		results := c.psaEvaluator.EvaluatePod(
+			psapi.LevelVersion{Level: enforcementLevel, Version: enforcementVersion},
+			&pod.ObjectMeta,
+			&pod.Spec,
+		)
 
-			for _, result := range results {
-				if !result.Allowed {
-					// This pod is running as a user's SCC and is violating the given PSA level
-					return true, nil
-				}
+		for _, result := range results {
+			if !result.Allowed {
+				klog.V(4).InfoS("User pod violates PSA level", 
+					"namespace", ns.Name, "pod", pod.Name, "level", label)
+				return true, nil // User pod violates the level
 			}
 		}
 	}
 
-	return false, nil
+	return false, nil // User pods all pass - violation is from service accounts
 }
 
 func shouldCheckForUserSCC(ns *corev1.Namespace) bool {
