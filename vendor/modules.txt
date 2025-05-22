@@ -1510,6 +1510,7 @@ k8s.io/kube-openapi/pkg/validation/strfmt/bson
 # k8s.io/pod-security-admission v0.32.1
 ## explicit; go 1.23.0
 k8s.io/pod-security-admission/api
+k8s.io/pod-security-admission/policy
 # k8s.io/utils v0.0.0-20241210054802-24370beab758
 ## explicit; go 1.18
 k8s.io/utils/buffer
