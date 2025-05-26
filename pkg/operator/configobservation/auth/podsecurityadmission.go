@@ -3,7 +3,6 @@ package auth
 import (
 	"fmt"
 
-	"github.com/openshift/api/features"
 	"github.com/openshift/library-go/pkg/operator/configobserver"
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -30,7 +29,7 @@ var configPath = []string{"admission", "pluginConfig", "PodSecurity", "configura
 */
 func SetPodSecurityAdmissionToEnforceRestricted(config map[string]interface{}) error {
 	psaEnforceRestricted := map[string]interface{}{
-		"enforce":         "restricted",
+		"enforce":         "privileged",
 		"enforce-version": "latest",
 		"audit":           "restricted",
 		"audit-version":   "latest",
@@ -91,21 +90,9 @@ func observePodSecurityAdmissionEnforcement(featureGateAccessor featuregates.Fea
 		return existingConfig, nil
 	}
 
-	featureGates, err := featureGateAccessor.CurrentFeatureGates()
-	if err != nil {
-		return existingConfig, append(errs, err)
-	}
-
 	observedConfig := map[string]interface{}{}
-	switch {
-	case !featureGates.Enabled(features.FeatureGateOpenShiftPodSecurityAdmission):
-		if err := SetPodSecurityAdmissionToEnforcePrivileged(observedConfig); err != nil {
-			return existingConfig, append(errs, err)
-		}
-	default:
-		if err := SetPodSecurityAdmissionToEnforceRestricted(observedConfig); err != nil {
-			return existingConfig, append(errs, err)
-		}
+	if err := SetPodSecurityAdmissionToEnforcePrivileged(observedConfig); err != nil {
+		return existingConfig, append(errs, err)
 	}
 
 	return observedConfig, errs

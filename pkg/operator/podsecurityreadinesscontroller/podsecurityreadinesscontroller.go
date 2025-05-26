@@ -2,6 +2,7 @@ package podsecurityreadinesscontroller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,7 +22,8 @@ import (
 )
 
 const (
-	checkInterval = 240 * time.Minute // Adjust the interval as needed.
+	// TODO@ibihim don't merge with a minute, this is just for testing purposes.
+	checkInterval = 1 * time.Minute // Adjust the interval as needed.
 )
 
 // PodSecurityReadinessController checks if namespaces are ready for Pod Security Admission enforcement.
@@ -70,7 +72,7 @@ func NewPodSecurityReadinessController(
 		ToController("PodSecurityReadinessController", recorder), nil
 }
 
-func (c *PodSecurityReadinessController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
+func (c *PodSecurityReadinessController) sync(ctx context.Context, _ factory.SyncContext) error {
 	nsList, err := c.kubeClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: c.namespaceSelector})
 	if err != nil {
 		return err
@@ -79,16 +81,43 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, syncCtx facto
 	conditions := podSecurityOperatorConditions{}
 	for _, ns := range nsList.Items {
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			isViolating, isUserViolation, err := c.isNamespaceViolating(ctx, &ns)
+			isViolating, enforceLevel, err := c.isNamespaceViolating(ctx, &ns)
 			if apierrors.IsNotFound(err) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
-			if isViolating {
-				conditions.addViolation(&ns, isUserViolation)
+			if !isViolating {
+				return nil
 			}
+
+			if runLevelZeroNamespaces.Has(ns.Name) {
+				conditions.addViolatingRunLevelZero(&ns)
+				return nil
+			}
+			if strings.HasPrefix(ns.Name, "openshift") {
+				conditions.addViolatingOpenShift(&ns)
+				return nil
+			}
+			if ns.Labels[labelSyncControlLabel] == "false" {
+				conditions.addViolatingDisabledSyncer(&ns)
+				return nil
+			}
+			isUserViolation, err := c.isUserViolation(ctx, &ns, enforceLevel)
+			if err != nil {
+				// Transient API server error or temporary resource unavailability (most likely).
+				// Theoretically, psapi parsing errors could occur that retry without hope for recovery.
+				return err
+			}
+			if isUserViolation {
+				conditions.addUserSCCViolation(&ns)
+				return nil
+			}
+
+			// Historically, we assume that this is a customer issue, but
+			// actually it means we don't know what the root cause is.
+			conditions.addViolatingCustomer(&ns)
 
 			return nil
 		})

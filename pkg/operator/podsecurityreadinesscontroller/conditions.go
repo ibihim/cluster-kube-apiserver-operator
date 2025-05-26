@@ -3,7 +3,6 @@ package podsecurityreadinesscontroller
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,33 +44,28 @@ type podSecurityOperatorConditions struct {
 	userSCCViolationNamespaces        []string
 }
 
-func (c *podSecurityOperatorConditions) addViolation(ns *corev1.Namespace, isUserViolation bool) {
-	// Consolidated namespace categorization logic
-	if runLevelZeroNamespaces.Has(ns.Name) {
-		c.violatingRunLevelZeroNamespaces = append(c.violatingRunLevelZeroNamespaces, ns.Name)
-		return
-	}
+func (c *podSecurityOperatorConditions) addViolatingOpenShift(ns *corev1.Namespace) {
+	c.violatingOpenShiftNamespaces = append(c.violatingOpenShiftNamespaces, ns.Name)
+}
 
-	isOpenShift := strings.HasPrefix(ns.Name, "openshift")
-	if isOpenShift {
-		c.violatingOpenShiftNamespaces = append(c.violatingOpenShiftNamespaces, ns.Name)
-		return
-	}
+func (c *podSecurityOperatorConditions) addViolatingRunLevelZero(ns *corev1.Namespace) {
+	c.violatingRunLevelZeroNamespaces = append(c.violatingRunLevelZeroNamespaces, ns.Name)
+}
 
-	if ns.Labels[labelSyncControlLabel] == "false" {
-		c.violatingDisabledSyncerNamespaces = append(c.violatingDisabledSyncerNamespaces, ns.Name)
-		return
-	}
-
-	// For customer namespaces, track both general and user-specific violations
+func (c *podSecurityOperatorConditions) addViolatingCustomer(ns *corev1.Namespace) {
 	c.violatingCustomerNamespaces = append(c.violatingCustomerNamespaces, ns.Name)
-	if isUserViolation {
-		c.userSCCViolationNamespaces = append(c.userSCCViolationNamespaces, ns.Name)
-	}
+}
+
+func (c *podSecurityOperatorConditions) addViolatingDisabledSyncer(ns *corev1.Namespace) {
+	c.violatingDisabledSyncerNamespaces = append(c.violatingDisabledSyncerNamespaces, ns.Name)
 }
 
 func (c *podSecurityOperatorConditions) addInconclusive(ns *corev1.Namespace) {
 	c.inconclusiveNamespaces = append(c.inconclusiveNamespaces, ns.Name)
+}
+
+func (c *podSecurityOperatorConditions) addUserSCCViolation(ns *corev1.Namespace) {
+	c.userSCCViolationNamespaces = append(c.userSCCViolationNamespaces, ns.Name)
 }
 
 func makeCondition(conditionType, conditionReason string, namespaces []string) operatorv1.OperatorCondition {
