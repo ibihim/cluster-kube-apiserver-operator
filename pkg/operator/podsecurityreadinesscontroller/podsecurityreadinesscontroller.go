@@ -87,10 +87,7 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, syncCtx facto
 				return err
 			}
 			if isViolating {
-				conditions.addViolation(&ns)
-				if isUserViolation {
-					conditions.addUserSCCViolation(&ns)
-				}
+				conditions.addViolation(&ns, isUserViolation)
 			}
 
 			return nil

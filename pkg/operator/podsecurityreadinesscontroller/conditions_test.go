@@ -280,7 +280,7 @@ func TestOperatorStatus(t *testing.T) {
 
 			for _, ns := range tt.namespace {
 				if tt.addViolation {
-					cond.addViolation(ns)
+					cond.addViolation(ns, false) // These tests are for general violations, not user violations
 				}
 				if tt.addInconclusive {
 					cond.addInconclusive(ns)

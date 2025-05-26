@@ -126,11 +126,11 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 }
 
 func shouldCheckForUserSCC(ns *corev1.Namespace) bool {
-	if runLevelZeroNamespaces.Has(ns.Name) || strings.HasPrefix(ns.Name, "openshift") || ns.Labels[labelSyncControlLabel] == "false" {
-		return false
-	}
-
-	return true
+	// Only check user SCC violations in customer namespaces
+	// (not run-level-zero, openshift, or disabled syncer namespaces)
+	return !runLevelZeroNamespaces.Has(ns.Name) && 
+		   !strings.HasPrefix(ns.Name, "openshift") && 
+		   ns.Labels[labelSyncControlLabel] != "false"
 }
 
 func determineEnforceLabelForNamespace(ns *applyconfiguration.NamespaceApplyConfiguration) (string, error) {

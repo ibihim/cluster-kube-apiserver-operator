@@ -25,7 +25,6 @@ const (
 
 	violationReason    = "PSViolationsDetected"
 	inconclusiveReason = "PSViolationDecisionInconclusive"
-	userSCCReason      = "PSUserSCCViolationsDetected"
 )
 
 var (
@@ -46,7 +45,8 @@ type podSecurityOperatorConditions struct {
 	userSCCViolationNamespaces        []string
 }
 
-func (c *podSecurityOperatorConditions) addViolation(ns *corev1.Namespace) {
+func (c *podSecurityOperatorConditions) addViolation(ns *corev1.Namespace, isUserViolation bool) {
+	// Consolidated namespace categorization logic
 	if runLevelZeroNamespaces.Has(ns.Name) {
 		c.violatingRunLevelZeroNamespaces = append(c.violatingRunLevelZeroNamespaces, ns.Name)
 		return
@@ -59,20 +59,19 @@ func (c *podSecurityOperatorConditions) addViolation(ns *corev1.Namespace) {
 	}
 
 	if ns.Labels[labelSyncControlLabel] == "false" {
-		// This is the only case in which the controller wouldn't enforce the pod security standards.
 		c.violatingDisabledSyncerNamespaces = append(c.violatingDisabledSyncerNamespaces, ns.Name)
 		return
 	}
 
+	// For customer namespaces, track both general and user-specific violations
 	c.violatingCustomerNamespaces = append(c.violatingCustomerNamespaces, ns.Name)
+	if isUserViolation {
+		c.userSCCViolationNamespaces = append(c.userSCCViolationNamespaces, ns.Name)
+	}
 }
 
 func (c *podSecurityOperatorConditions) addInconclusive(ns *corev1.Namespace) {
 	c.inconclusiveNamespaces = append(c.inconclusiveNamespaces, ns.Name)
-}
-
-func (c *podSecurityOperatorConditions) addUserSCCViolation(ns *corev1.Namespace) {
-	c.userSCCViolationNamespaces = append(c.userSCCViolationNamespaces, ns.Name)
 }
 
 func makeCondition(conditionType, conditionReason string, namespaces []string) operatorv1.OperatorCondition {
@@ -83,8 +82,6 @@ func makeCondition(conditionType, conditionReason string, namespaces []string) o
 		messageFormatter = "Violations detected in namespaces: %v"
 	case inconclusiveReason:
 		messageFormatter = "Could not evaluate violations for namespaces: %v"
-	case userSCCReason:
-		messageFormatter = "User SCC violations detected in namespaces: %v"
 	default:
 		messageFormatter = "Unexpected condition for namespace: %v"
 	}
@@ -118,6 +115,6 @@ func (c *podSecurityOperatorConditions) toConditionFuncs() []v1helpers.UpdateSta
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityRunLevelZeroType, violationReason, c.violatingRunLevelZeroNamespaces)),
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityDisabledSyncerType, violationReason, c.violatingDisabledSyncerNamespaces)),
 		v1helpers.UpdateConditionFn(makeCondition(PodSecurityInconclusiveType, inconclusiveReason, c.inconclusiveNamespaces)),
-		v1helpers.UpdateConditionFn(makeCondition(PodSecurityUserSCCType, userSCCReason, c.userSCCViolationNamespaces)),
+		v1helpers.UpdateConditionFn(makeCondition(PodSecurityUserSCCType, violationReason, c.userSCCViolationNamespaces)),
 	}
 }
