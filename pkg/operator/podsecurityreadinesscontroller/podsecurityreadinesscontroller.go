@@ -2,7 +2,6 @@ package podsecurityreadinesscontroller
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -92,34 +91,7 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, _ factory.Syn
 				return nil
 			}
 
-			if runLevelZeroNamespaces.Has(ns.Name) {
-				conditions.addViolatingRunLevelZero(&ns)
-				return nil
-			}
-			if strings.HasPrefix(ns.Name, "openshift") {
-				conditions.addViolatingOpenShift(&ns)
-				return nil
-			}
-			if ns.Labels[labelSyncControlLabel] == "false" {
-				conditions.addViolatingDisabledSyncer(&ns)
-				return nil
-			}
-			isUserViolation, err := c.isUserViolation(ctx, &ns, enforceLevel)
-			if err != nil {
-				// Transient API server error or temporary resource unavailability (most likely).
-				// Theoretically, psapi parsing errors could occur that retry without hope for recovery.
-				return err
-			}
-			if isUserViolation {
-				conditions.addUserSCCViolation(&ns)
-				return nil
-			}
-
-			// Historically, we assume that this is a customer issue, but
-			// actually it means we don't know what the root cause is.
-			conditions.addViolatingCustomer(&ns)
-
-			return nil
+			return c.classifyViolatingNamespace(ctx, &conditions, &ns, enforceLevel)
 		})
 		if err != nil {
 			klog.V(2).ErrorS(err, "namespace:", ns.Name)
@@ -134,6 +106,7 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, _ factory.Syn
 	_, _, err = v1helpers.UpdateStatus(ctx, c.operatorClient, conditions.toConditionFuncs()...)
 	return err
 }
+
 
 func nonEnforcingSelector() (string, error) {
 	selector := labels.NewSelector()

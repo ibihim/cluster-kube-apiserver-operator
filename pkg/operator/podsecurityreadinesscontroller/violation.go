@@ -2,8 +2,6 @@ package podsecurityreadinesscontroller
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	securityv1 "github.com/openshift/api/security/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,60 +90,3 @@ func determineEnforceLabelForNamespace(ns *applyconfiguration.NamespaceApplyConf
 	return targetLevel
 }
 
-func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns *corev1.Namespace, label string) (bool, error) {
-	// Parse the violating level
-	var enforcementLevel psapi.Level
-	switch strings.ToLower(label) {
-	case "restricted":
-		enforcementLevel = psapi.LevelRestricted
-	case "baseline":
-		enforcementLevel = psapi.LevelBaseline
-	case "privileged":
-		// If privileged is violating, something is seriously wrong
-		// but testing against privileged level is pointless (everything passes)
-		klog.V(2).InfoS("Namespace violating privileged level - skipping user check",
-			"namespace", ns.Name)
-		return false, nil
-	default:
-		return false, fmt.Errorf("unknown level: %q", label)
-	}
-
-	// List all pods and filter for user-annotated ones
-	allPods, err := c.kubeClient.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		klog.V(2).ErrorS(err, "Failed to list pods in namespace", "namespace", ns.Name)
-		return false, err
-	}
-
-	// Filter for user-annotated pods
-	var userPods []corev1.Pod
-	for _, pod := range allPods.Items {
-		if pod.Annotations[securityv1.ValidatedSCCSubjectTypeAnnotation] == "user" {
-			userPods = append(userPods, pod)
-		}
-	}
-
-	if len(userPods) == 0 {
-		return false, nil // No user pods = violation is from service accounts
-	}
-
-	// Test user pods against the violating level
-	enforcementVersion := psapi.LatestVersion()
-	for _, pod := range userPods {
-		results := c.psaEvaluator.EvaluatePod(
-			psapi.LevelVersion{Level: enforcementLevel, Version: enforcementVersion},
-			&pod.ObjectMeta,
-			&pod.Spec,
-		)
-
-		for _, result := range results {
-			if !result.Allowed {
-				klog.V(4).InfoS("User pod violates PSA level",
-					"namespace", ns.Name, "pod", pod.Name, "level", label)
-				return true, nil // User pod violates the level
-			}
-		}
-	}
-
-	return false, nil // User pods all pass - violation is from service accounts
-}
