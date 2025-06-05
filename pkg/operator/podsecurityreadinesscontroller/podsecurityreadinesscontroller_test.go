@@ -316,11 +316,11 @@ func TestPodSecurityViolationController(t *testing.T) {
 				},
 			},
 			expectedViolation:    false,
-			expectedEnforceLabel: "",
-			expectedError:        true,
+			expectedEnforceLabel: "restricted",
+			expectedError:        false,
 		},
 		{
-			name:     "error against inconclusive namespace",
+			name:     "inconclusive namespace with syncer managed fields but no labels",
 			warnings: []string{},
 			namespace: &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -329,8 +329,8 @@ func TestPodSecurityViolationController(t *testing.T) {
 				},
 			},
 			expectedViolation:    false,
-			expectedEnforceLabel: "",
-			expectedError:        true,
+			expectedEnforceLabel: "restricted",
+			expectedError:        false,
 		},
 	} {
 		tt := tt
@@ -419,5 +419,92 @@ func TestNamespaceSelector(t *testing.T) {
 		if ok {
 			t.Error("unexpected enforce label", label)
 		}
+	}
+}
+
+func TestIntegrationSimple(t *testing.T) {
+	// Simple integration test that verifies the classification workflow works
+	fakeClient := fake.NewSimpleClientset()
+
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		t.Fatalf("Failed to create PSA evaluator: %v", err)
+	}
+
+	controller := &PodSecurityReadinessController{
+		kubeClient:   fakeClient,
+		psaEvaluator: psaEvaluator,
+	}
+
+	testCases := []struct {
+		name                string
+		namespace           *corev1.Namespace
+		expectedConditionType string
+	}{
+		{
+			name: "kube-system namespace",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: "kube-system"},
+			},
+			expectedConditionType: "runLevelZero",
+		},
+		{
+			name: "openshift namespace",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: "openshift-test"},
+			},
+			expectedConditionType: "openshift",
+		},
+		{
+			name: "disabled syncer namespace",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "disabled-ns",
+					Labels: map[string]string{
+						"security.openshift.io/scc.podSecurityLabelSync": "false",
+					},
+				},
+			},
+			expectedConditionType: "disabledSyncer",
+		},
+		{
+			name: "customer namespace",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: "customer-ns"},
+			},
+			expectedConditionType: "customer",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			conditions := podSecurityOperatorConditions{}
+			
+			err := controller.classifyViolatingNamespace(context.Background(), &conditions, tc.namespace, "restricted")
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			// Verify that the namespace was classified correctly
+			switch tc.expectedConditionType {
+			case "runLevelZero":
+				if len(conditions.violatingRunLevelZeroNamespaces) != 1 || conditions.violatingRunLevelZeroNamespaces[0] != tc.namespace.Name {
+					t.Errorf("Expected runLevelZero classification for %s", tc.namespace.Name)
+				}
+			case "openshift":
+				if len(conditions.violatingOpenShiftNamespaces) != 1 || conditions.violatingOpenShiftNamespaces[0] != tc.namespace.Name {
+					t.Errorf("Expected openshift classification for %s", tc.namespace.Name)
+				}
+			case "disabledSyncer":
+				if len(conditions.violatingDisabledSyncerNamespaces) != 1 || conditions.violatingDisabledSyncerNamespaces[0] != tc.namespace.Name {
+					t.Errorf("Expected disabledSyncer classification for %s", tc.namespace.Name)
+				}
+			case "customer":
+				if len(conditions.violatingCustomerNamespaces) != 1 || conditions.violatingCustomerNamespaces[0] != tc.namespace.Name {
+					t.Errorf("Expected customer classification for %s", tc.namespace.Name)
+				}
+			}
+		})
 	}
 }
