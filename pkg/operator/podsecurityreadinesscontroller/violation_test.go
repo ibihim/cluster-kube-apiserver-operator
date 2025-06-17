@@ -124,7 +124,7 @@ func TestIsNamespaceViolating(t *testing.T) {
 
 			tc.namespace.ManagedFields = managedFields
 
-			violating, err := controller.isNamespaceViolating(context.Background(), tc.namespace)
+			violating, _, err := controller.isNamespaceViolating(context.Background(), tc.namespace)
 
 			if (err != nil) != tc.expectError {
 				t.Errorf("isNamespaceViolating() error = %v, expectError %v", err, tc.expectError)

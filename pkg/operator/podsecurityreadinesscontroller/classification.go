@@ -36,7 +36,7 @@ func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.
 	klog.InfoS("User violation check result", "namespace", ns.Name, "isUserViolation", isUserViolation)
 	if isUserViolation {
 		klog.InfoS("Adding namespace to user SCC violations", "namespace", ns.Name)
-		conditions.addUserSCCViolation(ns)
+		conditions.addViolatingUserSCC(ns)
 		return nil
 	}
 
@@ -123,4 +123,3 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 
 	return false, nil // User pods all pass - violation is from service accounts
 }
-

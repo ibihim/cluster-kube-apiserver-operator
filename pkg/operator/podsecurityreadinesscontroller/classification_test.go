@@ -238,7 +238,7 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				case "customer":
 					actualNamespaces = conditions.violatingCustomerNamespaces
 				case "userSCC":
-					actualNamespaces = conditions.userSCCViolationNamespaces
+					actualNamespaces = conditions.violatingUserSCCNamespaces
 				}
 
 				if len(actualNamespaces) != len(expectedNamespaces) {

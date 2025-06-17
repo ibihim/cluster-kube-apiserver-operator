@@ -274,12 +274,12 @@ func TestUserSCCViolationConditionDetection(t *testing.T) {
 
 			// Verify namespace classification
 			if tt.expectedUserViolation {
-				if len(conditions.userSCCViolationNamespaces) != 1 || conditions.userSCCViolationNamespaces[0] != tt.namespace.Name {
-					t.Errorf("Expected namespace %s in userSCCViolationNamespaces, got %v", tt.namespace.Name, conditions.userSCCViolationNamespaces)
+				if len(conditions.violatingUserSCCNamespaces) != 1 || conditions.violatingUserSCCNamespaces[0] != tt.namespace.Name {
+					t.Errorf("Expected namespace %s in userSCCViolationNamespaces, got %v", tt.namespace.Name, conditions.violatingUserSCCNamespaces)
 				}
 			} else {
-				if len(conditions.userSCCViolationNamespaces) != 0 {
-					t.Errorf("Expected no user SCC violations, got %v", conditions.userSCCViolationNamespaces)
+				if len(conditions.violatingUserSCCNamespaces) != 0 {
+					t.Errorf("Expected no user SCC violations, got %v", conditions.violatingUserSCCNamespaces)
 				}
 			}
 		})
@@ -427,4 +427,3 @@ func TestUserSCCViolationDetectionWithSpecificPSALevels(t *testing.T) {
 		})
 	}
 }
-
