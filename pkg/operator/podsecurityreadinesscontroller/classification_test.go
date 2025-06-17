@@ -2,12 +2,16 @@ package podsecurityreadinesscontroller
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	securityv1 "github.com/openshift/api/security/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/pod-security-admission/policy"
 )
 
@@ -45,6 +49,20 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			enforceLevel: "restricted",
 			expectedConditions: map[string][]string{
 				"runLevelZero": {"default"},
+			},
+			expectError: false,
+		},
+		{
+			name: "run-level zero namespace - kube-public",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "kube-public",
+				},
+			},
+			pods:         []corev1.Pod{},
+			enforceLevel: "restricted",
+			expectedConditions: map[string][]string{
+				"runLevelZero": {"kube-public"},
 			},
 			expectError: false,
 		},
@@ -170,6 +188,52 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
+			expectedConditions: map[string][]string{
+				"customer": {"customer-ns"},
+			},
+			expectError: false,
+		},
+		{
+			name: "customer namespace with pods without SCC annotation",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "customer-ns",
+				},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod-without-annotation",
+						Namespace: "customer-ns",
+						// No SCC annotation
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "container",
+								Image: "image",
+							},
+						},
+					},
+				},
+			},
+			enforceLevel: "restricted",
+			expectedConditions: map[string][]string{
+				"customer": {"customer-ns"},
+			},
+			expectError: false,
+		},
+		{
+			name: "namespace tested against privileged level",
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "customer-ns",
+				},
+			},
+			pods: []corev1.Pod{
+				newUserSCCPodPrivileged("user-pod", "customer-ns"),
+			},
+			enforceLevel: "privileged",
 			expectedConditions: map[string][]string{
 				"customer": {"customer-ns"},
 			},
@@ -363,5 +427,150 @@ func newUserSCCPodRestricted(name, namespace string) corev1.Pod {
 				},
 			},
 		},
+	}
+}
+
+func TestClassifyViolatingNamespaceWithAPIErrors(t *testing.T) {
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "error-test-ns",
+		},
+	}
+
+	// Create a fake client that returns errors
+	fakeClient := fake.NewSimpleClientset()
+	fakeClient.PrependReactor("list", "pods", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("simulated API error: connection refused")
+	})
+
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		t.Fatalf("Failed to create PSA evaluator: %v", err)
+	}
+
+	controller := &PodSecurityReadinessController{
+		kubeClient:   fakeClient,
+		psaEvaluator: psaEvaluator,
+	}
+
+	conditions := podSecurityOperatorConditions{}
+
+	// Test that API errors are properly propagated
+	err = controller.classifyViolatingNamespace(
+		context.Background(), &conditions,
+		namespace, "restricted",
+	)
+
+	if err == nil {
+		t.Errorf("Expected error from API failure, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "simulated API error") {
+		t.Errorf("Expected API error, got: %v", err)
+	}
+
+	// Ensure no classifications were made due to the error
+	if len(conditions.violatingCustomerNamespaces) != 0 ||
+		len(conditions.violatingUserSCCNamespaces) != 0 ||
+		len(conditions.violatingOpenShiftNamespaces) != 0 ||
+		len(conditions.violatingRunLevelZeroNamespaces) != 0 ||
+		len(conditions.violatingDisabledSyncerNamespaces) != 0 {
+		t.Errorf("Expected no classifications due to API error, but got: %+v", conditions)
+	}
+}
+
+func TestClassifyViolatingNamespaceWithManyPods(t *testing.T) {
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "large-namespace",
+		},
+	}
+
+	// Create many pods to test performance/scalability
+	var pods []corev1.Pod
+	for i := 0; i < 100; i++ {
+		if i%3 == 0 {
+			// Every third pod is a user pod that violates
+			pods = append(pods, corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("user-pod-%d", i),
+					Namespace: "large-namespace",
+					Annotations: map[string]string{
+						securityv1.ValidatedSCCSubjectTypeAnnotation: "user",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "container",
+							Image: "image",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &[]bool{true}[0],
+							},
+						},
+					},
+				},
+			})
+		} else {
+			// Service account pods
+			pods = append(pods, corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("sa-pod-%d", i),
+					Namespace: "large-namespace",
+					Annotations: map[string]string{
+						securityv1.ValidatedSCCSubjectTypeAnnotation: "serviceaccount",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "container",
+							Image: "image",
+						},
+					},
+				},
+			})
+		}
+	}
+
+	fakeClient := fake.NewSimpleClientset()
+	for _, pod := range pods {
+		_, err := fakeClient.CoreV1().Pods(namespace.Name).Create(context.Background(), &pod, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Failed to create test pod: %v", err)
+		}
+	}
+
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		t.Fatalf("Failed to create PSA evaluator: %v", err)
+	}
+
+	controller := &PodSecurityReadinessController{
+		kubeClient:   fakeClient,
+		psaEvaluator: psaEvaluator,
+	}
+
+	conditions := podSecurityOperatorConditions{}
+
+	// Test classification with many pods
+	err = controller.classifyViolatingNamespace(
+		context.Background(), &conditions,
+		namespace, "restricted",
+	)
+
+	if err != nil {
+		t.Errorf("classifyViolatingNamespace() error = %v", err)
+	}
+
+	// Should detect user SCC violations (from the user pods)
+	if len(conditions.violatingUserSCCNamespaces) != 1 || 
+		conditions.violatingUserSCCNamespaces[0] != "large-namespace" {
+		t.Errorf("Expected user SCC violation for large-namespace, got: %v", conditions.violatingUserSCCNamespaces)
+	}
+
+	// Should not have other classifications
+	if len(conditions.violatingCustomerNamespaces) != 0 {
+		t.Errorf("Expected no customer violations, got: %v", conditions.violatingCustomerNamespaces)
 	}
 }
