@@ -12,19 +12,28 @@ import (
 	psapi "k8s.io/pod-security-admission/api"
 )
 
-func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.Context, conditions *podSecurityOperatorConditions, ns *corev1.Namespace, enforceLevel string) error {
+func (c *PodSecurityReadinessController) classifyViolatingNamespace(
+	ctx context.Context,
+	conditions *podSecurityOperatorConditions,
+	ns *corev1.Namespace,
+	enforceLevel string,
+) error {
 	if runLevelZeroNamespaces.Has(ns.Name) {
 		conditions.addViolatingRunLevelZero(ns)
 		return nil
 	}
+
 	if strings.HasPrefix(ns.Name, "openshift") {
 		conditions.addViolatingOpenShift(ns)
 		return nil
 	}
+
 	if ns.Labels[labelSyncControlLabel] == "false" {
 		conditions.addViolatingDisabledSyncer(ns)
 		return nil
 	}
+
+	// TODO remove logging line
 	klog.InfoS("Checking for user violations", "namespace", ns.Name, "enforceLevel", enforceLevel)
 	isUserViolation, err := c.isUserViolation(ctx, ns, enforceLevel)
 	if err != nil {
@@ -33,8 +42,10 @@ func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.
 		// Theoretically, psapi parsing errors could occur that retry without hope for recovery.
 		return err
 	}
+	// TODO remove logging line
 	klog.InfoS("User violation check result", "namespace", ns.Name, "isUserViolation", isUserViolation)
 	if isUserViolation {
+		// TODO set log level for this logging line
 		klog.InfoS("Adding namespace to user SCC violations", "namespace", ns.Name)
 		conditions.addViolatingUserSCC(ns)
 		return nil
@@ -87,16 +98,10 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 	// Test user pods against the violating level
 	enforcementVersion := psapi.LatestVersion()
 	for _, pod := range userPods {
+		// TODO remove logging line
 		klog.InfoS("Evaluating user pod against PSA level",
 			"namespace", ns.Name, "pod", pod.Name, "level", label,
 			"podSecurityContext", pod.Spec.SecurityContext)
-
-		// Log container security contexts for debugging
-		for i, container := range pod.Spec.Containers {
-			klog.InfoS("Container security context",
-				"namespace", ns.Name, "pod", pod.Name, "container", i,
-				"securityContext", container.SecurityContext)
-		}
 
 		results := c.psaEvaluator.EvaluatePod(
 			psapi.LevelVersion{Level: enforcementLevel, Version: enforcementVersion},
@@ -104,16 +109,19 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 			&pod.Spec,
 		)
 
+		// TODO remove logging line
 		klog.InfoS("PSA evaluation results",
 			"namespace", ns.Name, "pod", pod.Name, "level", label,
 			"resultCount", len(results))
 
 		for _, result := range results {
+			// TODO remove logging line
 			klog.InfoS("PSA evaluation result",
 				"namespace", ns.Name, "pod", pod.Name, "level", label,
 				"allowed", result.Allowed, "reason", result.ForbiddenReason,
 				"detail", result.ForbiddenDetail)
 			if !result.Allowed {
+				// TODO remove logging line
 				klog.InfoS("User pod violates PSA level",
 					"namespace", ns.Name, "pod", pod.Name, "level", label)
 				return true, nil // User pod violates the level

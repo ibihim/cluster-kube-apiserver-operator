@@ -146,7 +146,7 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "customer namespace with user pods that pass PSA",
+			name: "customer namespace with user pods that don't violate (but something else does)",
 			namespace: &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "customer-ns",

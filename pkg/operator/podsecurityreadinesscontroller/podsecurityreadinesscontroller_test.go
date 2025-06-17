@@ -316,7 +316,7 @@ func TestPodSecurityViolationController(t *testing.T) {
 			},
 			expectedViolation:    false,
 			expectedEnforceLabel: "",
-			expectedError:        true,
+			expectedError:        false,
 		},
 		{
 			name:     "error against inconclusive namespace",

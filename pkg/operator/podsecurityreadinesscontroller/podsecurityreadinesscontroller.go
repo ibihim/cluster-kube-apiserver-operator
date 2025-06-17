@@ -86,11 +86,11 @@ func (c *PodSecurityReadinessController) sync(ctx context.Context, _ factory.Syn
 			if err != nil {
 				return err
 			}
-			if !isViolating {
-				return nil
+			if isViolating {
+				return c.classifyViolatingNamespace(ctx, &conditions, &ns, enforceLevel)
 			}
 
-			return c.classifyViolatingNamespace(ctx, &conditions, &ns, enforceLevel)
+			return nil
 		})
 		if err != nil {
 			klog.V(2).ErrorS(err, "namespace:", ns.Name)
