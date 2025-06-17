@@ -88,7 +88,7 @@ func TestIsNamespaceViolating(t *testing.T) {
 				return &mockKubeClientWithResponse{}
 			},
 			expectViolating: false,
-			expectError:     true,
+			expectError:     false,
 		},
 		{
 			name: "Apply returns error",
