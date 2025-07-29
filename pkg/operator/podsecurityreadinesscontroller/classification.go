@@ -36,6 +36,8 @@ func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.
 		conditions.addViolatingDisabledSyncer(ns)
 		return nil
 	}
+
+	// TODO@ibihim: increase log level
 	klog.InfoS("Checking for user violations", "namespace", ns.Name, "enforceLevel", enforceLevel)
 	isUserViolation, err := c.isUserViolation(ctx, ns, enforceLevel)
 	if err != nil {
@@ -44,8 +46,11 @@ func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.
 		// Theoretically, psapi parsing errors could occur that retry without hope for recovery.
 		return err
 	}
+
+	// TODO@ibihim: increase log level
 	klog.InfoS("User violation check result", "namespace", ns.Name, "isUserViolation", isUserViolation)
 	if isUserViolation {
+		// TODO@ibihim: increase log level
 		klog.InfoS("Adding namespace to user SCC violations", "namespace", ns.Name)
 		conditions.addViolatingUserSCC(ns)
 		return nil
@@ -86,6 +91,10 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 	// Filter for user-annotated pods
 	var userPods []corev1.Pod
 	for _, pod := range allPods.Items {
+		// TODO@ibihim: we should exclude Pod that have restricted-v2.
+		// restricted-v2 SCCs are allowed for all system:authenticated. ServiceAccounts
+		// are able to use that, but they are not part of the group. So restricted-v2
+		// will always result in user.
 		if pod.Annotations[securityv1.ValidatedSCCSubjectTypeAnnotation] == "user" {
 			userPods = append(userPods, pod)
 		}
@@ -101,13 +110,6 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 		klog.InfoS("Evaluating user pod against PSA level",
 			"namespace", ns.Name, "pod", pod.Name, "level", label,
 			"podSecurityContext", pod.Spec.SecurityContext)
-
-		// Log container security contexts for debugging
-		for i, container := range pod.Spec.Containers {
-			klog.InfoS("Container security context",
-				"namespace", ns.Name, "pod", pod.Name, "container", i,
-				"securityContext", container.SecurityContext)
-		}
 
 		results := c.psaEvaluator.EvaluatePod(
 			psapi.LevelVersion{Level: enforcementLevel, Version: enforcementVersion},
