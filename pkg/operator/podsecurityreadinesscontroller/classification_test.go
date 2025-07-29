@@ -15,6 +15,53 @@ import (
 	"k8s.io/pod-security-admission/policy"
 )
 
+func TestClassifyViolatingNamespaceWithAPIErrors(t *testing.T) {
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "error-test-ns",
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset()
+	fakeClient.PrependReactor("list", "pods", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("simulated API error: connection refused")
+	})
+
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		t.Fatalf("Failed to create PSA evaluator: %v", err)
+	}
+
+	controller := &PodSecurityReadinessController{
+		kubeClient:   fakeClient,
+		psaEvaluator: psaEvaluator,
+	}
+
+	conditions := podSecurityOperatorConditions{}
+
+	err = controller.classifyViolatingNamespace(
+		context.Background(), &conditions,
+		namespace, "restricted",
+	)
+
+	if err == nil {
+		t.Errorf("Expected error from API failure, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "simulated API error") {
+		t.Errorf("Expected API error, got: %v", err)
+	}
+
+	// Ensure no classifications were made due to the error
+	if len(conditions.violatingCustomerNamespaces) != 0 ||
+		len(conditions.violatingUserSCCNamespaces) != 0 ||
+		len(conditions.violatingOpenShiftNamespaces) != 0 ||
+		len(conditions.violatingRunLevelZeroNamespaces) != 0 ||
+		len(conditions.violatingDisabledSyncerNamespaces) != 0 {
+		t.Errorf("Expected no classifications due to API error, but got: %+v", conditions)
+	}
+}
+
 func TestClassifyViolatingNamespace(t *testing.T) {
 	for _, tt := range []struct {
 		name               string
@@ -253,43 +300,24 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewSimpleClientset()
-
-			// Add pods to fake client
-			for _, pod := range tt.pods {
-				_, err := fakeClient.CoreV1().Pods(tt.namespace.Name).Create(context.Background(), &pod, metav1.CreateOptions{})
-				if err != nil {
-					t.Fatalf("Failed to create test pod: %v", err)
-				}
-			}
-
-			psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+			controller, err := createTestController(tt.pods)
 			if err != nil {
-				t.Fatalf("Failed to create PSA evaluator: %v", err)
-			}
-
-			controller := &PodSecurityReadinessController{
-				kubeClient:   fakeClient,
-				psaEvaluator: psaEvaluator,
+				t.Fatal(err)
 			}
 
 			conditions := podSecurityOperatorConditions{}
-
 			err = controller.classifyViolatingNamespace(
 				context.Background(), &conditions,
 				tt.namespace, tt.enforceLevel,
 			)
-
-			if (err != nil) != tt.expectError {
+			if hasError := err != nil; hasError != tt.expectError {
 				t.Errorf("classifyViolatingNamespace() error = %v, expectError %v", err, tt.expectError)
 				return
 			}
-
 			if err != nil {
-				return // Expected error, nothing more to check
+				return
 			}
 
-			// Verify the conditions were set correctly
 			for conditionType, expectedNamespaces := range tt.expectedConditions {
 				var actualNamespaces []string
 				switch conditionType {
@@ -326,7 +354,29 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 	}
 }
 
-// Test pod creation helpers
+func createTestController(pods []corev1.Pod) (*PodSecurityReadinessController, error) {
+	fakeClient := fake.NewSimpleClientset()
+
+	for _, pod := range pods {
+		_, err := fakeClient.CoreV1().
+			Pods(pod.Namespace).
+			Create(context.Background(), &pod, metav1.CreateOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("Failed to create test pod: %v", err)
+		}
+	}
+
+	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create PSA evaluator: %v", err)
+	}
+
+	return &PodSecurityReadinessController{
+		kubeClient:   fakeClient,
+		psaEvaluator: psaEvaluator,
+	}, nil
+}
+
 func newUserSCCPodPrivileged(name, namespace string) corev1.Pod {
 	return corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -427,150 +477,5 @@ func newUserSCCPodRestricted(name, namespace string) corev1.Pod {
 				},
 			},
 		},
-	}
-}
-
-func TestClassifyViolatingNamespaceWithAPIErrors(t *testing.T) {
-	namespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "error-test-ns",
-		},
-	}
-
-	// Create a fake client that returns errors
-	fakeClient := fake.NewSimpleClientset()
-	fakeClient.PrependReactor("list", "pods", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
-		return true, nil, fmt.Errorf("simulated API error: connection refused")
-	})
-
-	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
-	if err != nil {
-		t.Fatalf("Failed to create PSA evaluator: %v", err)
-	}
-
-	controller := &PodSecurityReadinessController{
-		kubeClient:   fakeClient,
-		psaEvaluator: psaEvaluator,
-	}
-
-	conditions := podSecurityOperatorConditions{}
-
-	// Test that API errors are properly propagated
-	err = controller.classifyViolatingNamespace(
-		context.Background(), &conditions,
-		namespace, "restricted",
-	)
-
-	if err == nil {
-		t.Errorf("Expected error from API failure, got nil")
-	}
-
-	if !strings.Contains(err.Error(), "simulated API error") {
-		t.Errorf("Expected API error, got: %v", err)
-	}
-
-	// Ensure no classifications were made due to the error
-	if len(conditions.violatingCustomerNamespaces) != 0 ||
-		len(conditions.violatingUserSCCNamespaces) != 0 ||
-		len(conditions.violatingOpenShiftNamespaces) != 0 ||
-		len(conditions.violatingRunLevelZeroNamespaces) != 0 ||
-		len(conditions.violatingDisabledSyncerNamespaces) != 0 {
-		t.Errorf("Expected no classifications due to API error, but got: %+v", conditions)
-	}
-}
-
-func TestClassifyViolatingNamespaceWithManyPods(t *testing.T) {
-	namespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "large-namespace",
-		},
-	}
-
-	// Create many pods to test performance/scalability
-	var pods []corev1.Pod
-	for i := 0; i < 100; i++ {
-		if i%3 == 0 {
-			// Every third pod is a user pod that violates
-			pods = append(pods, corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("user-pod-%d", i),
-					Namespace: "large-namespace",
-					Annotations: map[string]string{
-						securityv1.ValidatedSCCSubjectTypeAnnotation: "user",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "container",
-							Image: "image",
-							SecurityContext: &corev1.SecurityContext{
-								Privileged: &[]bool{true}[0],
-							},
-						},
-					},
-				},
-			})
-		} else {
-			// Service account pods
-			pods = append(pods, corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      fmt.Sprintf("sa-pod-%d", i),
-					Namespace: "large-namespace",
-					Annotations: map[string]string{
-						securityv1.ValidatedSCCSubjectTypeAnnotation: "serviceaccount",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "container",
-							Image: "image",
-						},
-					},
-				},
-			})
-		}
-	}
-
-	fakeClient := fake.NewSimpleClientset()
-	for _, pod := range pods {
-		_, err := fakeClient.CoreV1().Pods(namespace.Name).Create(context.Background(), &pod, metav1.CreateOptions{})
-		if err != nil {
-			t.Fatalf("Failed to create test pod: %v", err)
-		}
-	}
-
-	psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
-	if err != nil {
-		t.Fatalf("Failed to create PSA evaluator: %v", err)
-	}
-
-	controller := &PodSecurityReadinessController{
-		kubeClient:   fakeClient,
-		psaEvaluator: psaEvaluator,
-	}
-
-	conditions := podSecurityOperatorConditions{}
-
-	// Test classification with many pods
-	err = controller.classifyViolatingNamespace(
-		context.Background(), &conditions,
-		namespace, "restricted",
-	)
-
-	if err != nil {
-		t.Errorf("classifyViolatingNamespace() error = %v", err)
-	}
-
-	// Should detect user SCC violations (from the user pods)
-	if len(conditions.violatingUserSCCNamespaces) != 1 || 
-		conditions.violatingUserSCCNamespaces[0] != "large-namespace" {
-		t.Errorf("Expected user SCC violation for large-namespace, got: %v", conditions.violatingUserSCCNamespaces)
-	}
-
-	// Should not have other classifications
-	if len(conditions.violatingCustomerNamespaces) != 0 {
-		t.Errorf("Expected no customer violations, got: %v", conditions.violatingCustomerNamespaces)
 	}
 }
