@@ -199,32 +199,27 @@ func TestUserSCCViolationConditionDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create fake client with test data
 			objects := []runtime.Object{tt.namespace}
 			for _, pod := range tt.pods {
 				objects = append(objects, pod)
 			}
 			fakeClient := fake.NewSimpleClientset(objects...)
 
-			// Create PSA evaluator
 			psaEvaluator, err := policy.NewEvaluator(policy.DefaultChecks())
 			if err != nil {
 				t.Fatalf("Failed to create PSA evaluator: %v", err)
 			}
 
-			// Create controller
 			controller := &PodSecurityReadinessController{
 				kubeClient:   fakeClient,
 				psaEvaluator: psaEvaluator,
 			}
 
-			// Determine enforcement level from namespace annotation
 			enforcementLevel := "baseline"
 			if level, ok := tt.namespace.Annotations[securityv1.MinimallySufficientPodSecurityStandard]; ok {
 				enforcementLevel = level
 			}
 
-			// Test isUserViolation method directly
 			isUserViolation, err := controller.isUserViolation(context.Background(), tt.namespace, enforcementLevel)
 			if err != nil {
 				t.Errorf("isUserViolation returned error: %v", err)
@@ -233,19 +228,16 @@ func TestUserSCCViolationConditionDetection(t *testing.T) {
 				t.Errorf("Expected isUserViolation=%v, got %v", tt.expectedUserViolation, isUserViolation)
 			}
 
-			// Test full classification workflow
 			conditions := podSecurityOperatorConditions{}
 			err = controller.classifyViolatingNamespace(context.Background(), &conditions, tt.namespace, enforcementLevel)
 			if err != nil {
 				t.Errorf("classifyViolatingNamespace returned error: %v", err)
 			}
 
-			// Verify user SCC violation condition
 			conditionFuncs := conditions.toConditionFuncs()
 			userSCCConditionFound := false
 
 			for _, conditionFunc := range conditionFuncs {
-				// Create a mock status to apply the condition to
 				mockStatus := &operatorv1.OperatorStatus{}
 				err := conditionFunc(mockStatus)
 				if err != nil {
@@ -253,7 +245,6 @@ func TestUserSCCViolationConditionDetection(t *testing.T) {
 					continue
 				}
 
-				// Check if this is the user SCC condition
 				for _, condition := range mockStatus.Conditions {
 					if condition.Type == PodSecurityUserSCCType {
 						userSCCConditionFound = true
@@ -287,7 +278,6 @@ func TestUserSCCViolationConditionDetection(t *testing.T) {
 }
 
 func TestUserSCCViolationDetectionWithSpecificPSALevels(t *testing.T) {
-	// Test specifically against different PSA levels
 	tests := []struct {
 		name             string
 		enforcementLevel string
