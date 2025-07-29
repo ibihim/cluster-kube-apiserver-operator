@@ -8,8 +8,20 @@ import (
 	securityv1 "github.com/openshift/api/security/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	psapi "k8s.io/pod-security-admission/api"
+)
+
+var (
+	// run-level zero namespaces, shouldn't avoid openshift namespaces
+	runLevelZeroNamespaces = sets.New[string](
+		"default",
+		"kube-system",
+		"kube-public",
+		"kube-node-lease",
+		"openshift",
+	)
 )
 
 func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.Context, conditions *podSecurityOperatorConditions, ns *corev1.Namespace, enforceLevel string) error {

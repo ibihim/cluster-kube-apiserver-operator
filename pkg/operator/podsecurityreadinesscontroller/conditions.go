@@ -6,7 +6,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
@@ -24,15 +23,6 @@ const (
 
 	violationReason    = "PSViolationsDetected"
 	inconclusiveReason = "PSViolationDecisionInconclusive"
-)
-
-var (
-	// run-level zero namespaces, shouldn't avoid openshift namespaces
-	runLevelZeroNamespaces = sets.New[string](
-		"default",
-		"kube-system",
-		"kube-public",
-	)
 )
 
 type podSecurityOperatorConditions struct {
