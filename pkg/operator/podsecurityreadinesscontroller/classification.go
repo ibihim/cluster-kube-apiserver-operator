@@ -20,7 +20,6 @@ var (
 		"kube-system",
 		"kube-public",
 		"kube-node-lease",
-		"openshift",
 	)
 )
 
