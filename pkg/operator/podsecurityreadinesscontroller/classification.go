@@ -14,7 +14,6 @@ import (
 )
 
 var (
-	// run-level zero namespaces, shouldn't avoid openshift namespaces
 	runLevelZeroNamespaces = sets.New[string](
 		"default",
 		"kube-system",
@@ -64,7 +63,6 @@ func (c *PodSecurityReadinessController) classifyViolatingNamespace(ctx context.
 }
 
 func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns *corev1.Namespace, label string) (bool, error) {
-	// Parse the violating level
 	var enforcementLevel psapi.Level
 	switch strings.ToLower(label) {
 	case "restricted":
@@ -81,14 +79,12 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 		return false, fmt.Errorf("unknown level: %q", label)
 	}
 
-	// List all pods and filter for user-annotated ones
 	allPods, err := c.kubeClient.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		klog.V(2).ErrorS(err, "Failed to list pods in namespace", "namespace", ns.Name)
 		return false, err
 	}
 
-	// Filter for user-annotated pods
 	var userPods []corev1.Pod
 	for _, pod := range allPods.Items {
 		// TODO@ibihim: we should exclude Pod that have restricted-v2.
@@ -104,7 +100,6 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 		return false, nil // No user pods = violation is from service accounts
 	}
 
-	// Test user pods against the violating level
 	enforcementVersion := psapi.LatestVersion()
 	for _, pod := range userPods {
 		klog.InfoS("Evaluating user pod against PSA level",
@@ -129,10 +124,10 @@ func (c *PodSecurityReadinessController) isUserViolation(ctx context.Context, ns
 			if !result.Allowed {
 				klog.InfoS("User pod violates PSA level",
 					"namespace", ns.Name, "pod", pod.Name, "level", label)
-				return true, nil // User pod violates the level
+				return true, nil
 			}
 		}
 	}
 
-	return false, nil // User pods all pass - violation is from service accounts
+	return false, nil
 }

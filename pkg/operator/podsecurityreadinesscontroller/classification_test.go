@@ -3,6 +3,7 @@ package podsecurityreadinesscontroller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 		namespace          *corev1.Namespace
 		pods               []corev1.Pod
 		enforceLevel       string
-		expectedConditions map[string][]string
+		expectedConditions podSecurityOperatorConditions
 		expectError        bool
 	}{
 		{
@@ -80,8 +81,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"runLevelZero": {"kube-system"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingRunLevelZeroNamespaces: []string{"kube-system"},
 			},
 			expectError: false,
 		},
@@ -94,8 +95,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"runLevelZero": {"default"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingRunLevelZeroNamespaces: []string{"default"},
 			},
 			expectError: false,
 		},
@@ -108,8 +109,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"runLevelZero": {"kube-public"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingRunLevelZeroNamespaces: []string{"kube-public"},
 			},
 			expectError: false,
 		},
@@ -122,8 +123,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"openshift": {"openshift-test"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingOpenShiftNamespaces: []string{"openshift-test"},
 			},
 			expectError: false,
 		},
@@ -139,8 +140,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"disabledSyncer": {"test-disabled"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingDisabledSyncerNamespaces: []string{"test-disabled"},
 			},
 			expectError: false,
 		},
@@ -155,8 +156,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newUserSCCPodPrivileged("user-pod", "customer-ns"),
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"userSCC": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingUserSCCNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -171,8 +172,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newUserSCCPodWithPrivilegedContainer("user-scc-violating-pod", "user-scc-violation-test"),
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"userSCC": {"user-scc-violation-test"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingUserSCCNamespaces: []string{"user-scc-violation-test"},
 			},
 			expectError: false,
 		},
@@ -187,8 +188,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newServiceAccountPod("sa-pod", "customer-ns"),
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"customer": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingCustomerNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -205,8 +206,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newUserSCCPodPrivileged("user-pod", "customer-ns"),
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"userSCC": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingUserSCCNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -221,8 +222,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newUserSCCPodRestricted("user-pod", "customer-ns"),
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"customer": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingCustomerNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -235,8 +236,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:         []corev1.Pod{},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"customer": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingCustomerNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -265,8 +266,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				},
 			},
 			enforceLevel: "restricted",
-			expectedConditions: map[string][]string{
-				"customer": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingCustomerNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -281,8 +282,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				newUserSCCPodPrivileged("user-pod", "customer-ns"),
 			},
 			enforceLevel: "privileged",
-			expectedConditions: map[string][]string{
-				"customer": {"customer-ns"},
+			expectedConditions: podSecurityOperatorConditions{
+				violatingCustomerNamespaces: []string{"customer-ns"},
 			},
 			expectError: false,
 		},
@@ -295,7 +296,7 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 			},
 			pods:               []corev1.Pod{},
 			enforceLevel:       "invalid-level",
-			expectedConditions: map[string][]string{},
+			expectedConditions: podSecurityOperatorConditions{},
 			expectError:        true,
 		},
 	} {
@@ -318,37 +319,8 @@ func TestClassifyViolatingNamespace(t *testing.T) {
 				return
 			}
 
-			for conditionType, expectedNamespaces := range tt.expectedConditions {
-				var actualNamespaces []string
-				switch conditionType {
-				case "runLevelZero":
-					actualNamespaces = conditions.violatingRunLevelZeroNamespaces
-				case "openshift":
-					actualNamespaces = conditions.violatingOpenShiftNamespaces
-				case "disabledSyncer":
-					actualNamespaces = conditions.violatingDisabledSyncerNamespaces
-				case "customer":
-					actualNamespaces = conditions.violatingCustomerNamespaces
-				case "userSCC":
-					actualNamespaces = conditions.violatingUserSCCNamespaces
-				}
-
-				if len(actualNamespaces) != len(expectedNamespaces) {
-					t.Errorf("expected %d %s namespaces, got %d", len(expectedNamespaces), conditionType, len(actualNamespaces))
-				}
-
-				for _, expected := range expectedNamespaces {
-					found := false
-					for _, actual := range actualNamespaces {
-						if actual == expected {
-							found = true
-							break
-						}
-					}
-					if !found {
-						t.Errorf("expected %s namespace %s not found in %v", conditionType, expected, actualNamespaces)
-					}
-				}
+			if !deepEqualPodSecurityOperatorConditions(&conditions, &tt.expectedConditions) {
+				t.Errorf("Conditions mismatch.\nHave: %+v\nWant: %+v", conditions, tt.expectedConditions)
 			}
 		})
 	}
@@ -478,4 +450,22 @@ func newUserSCCPodRestricted(name, namespace string) corev1.Pod {
 			},
 		},
 	}
+}
+
+func deepEqualPodSecurityOperatorConditions(
+	a, b *podSecurityOperatorConditions,
+) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	return slices.Equal(a.violatingOpenShiftNamespaces, b.violatingOpenShiftNamespaces) &&
+		slices.Equal(a.violatingRunLevelZeroNamespaces, b.violatingRunLevelZeroNamespaces) &&
+		slices.Equal(a.violatingCustomerNamespaces, b.violatingCustomerNamespaces) &&
+		slices.Equal(a.violatingDisabledSyncerNamespaces, b.violatingDisabledSyncerNamespaces) &&
+		slices.Equal(a.violatingUserSCCNamespaces, b.violatingUserSCCNamespaces) &&
+		slices.Equal(a.inconclusiveNamespaces, b.inconclusiveNamespaces)
 }
